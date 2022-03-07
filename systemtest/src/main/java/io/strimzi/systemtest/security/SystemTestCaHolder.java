@@ -11,7 +11,6 @@ import io.strimzi.systemtest.storage.TestStorage;
 import io.strimzi.systemtest.utils.kubeUtils.objects.SecretUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.junit.jupiter.api.extension.ExtensionContext;
 
 import java.io.File;
 import java.io.IOException;
@@ -28,28 +27,26 @@ import static io.strimzi.systemtest.security.SystemTestCertManager.convertPrivat
 import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
 
 /**
- * Provides representation of custom chain key-pair (i.e., {@code strimziRootCa}, {@code intermediateCa},
- * {@code systemTestClusterCa} and {@code systemTestClusterCa}. Moreover, it allow to generate a new Client or Cluster
+ * Provides representation of custom chain key-pair (i.e., {@code strimziRootCa}, {@code intermediateCa} and
+ * {@code systemTestCa}. Moreover, it allow to generate a new Client or Cluster
  * key-pair used for instance in renewal process.
  */
-public class SystemTestCertHolder {
+public class SystemTestCaHolder {
 
-    private static final Logger LOGGER = LogManager.getLogger(SystemTestCertHolder.class);
+    private static final Logger LOGGER = LogManager.getLogger(SystemTestCaHolder.class);
 
     private final String caCertSecretName;
     private final String caKeySecretName;
     private final String subjectDn;
+    private final SystemTestCertAndKey strimziRootCa;
+    private final SystemTestCertAndKey intermediateCa;
+    private final SystemTestCertAndKey systemTestCa;
+    private final CertAndKeyFiles bundle;
 
-    private SystemTestCertAndKey strimziRootCa;
-    private SystemTestCertAndKey intermediateCa;
-    private SystemTestCertAndKey systemTestCa;
-    private CertAndKeyFiles bundle;
-
-    public SystemTestCertHolder(final ExtensionContext extensionContext, final String cnName,
-                                final String caCertSecretName, final String caKeySecretName) {
+    public SystemTestCaHolder(final String subjectDn, final String caCertSecretName, final String caKeySecretName) {
         this.strimziRootCa = SystemTestCertManager.generateRootCaCertAndKey();
         this.intermediateCa = SystemTestCertManager.generateIntermediateCaCertAndKey(this.strimziRootCa);
-        this.subjectDn = "C=CZ, L=Prague, O=StrimziTest, " + cnName;
+        this.subjectDn = subjectDn;
 
         this.systemTestCa = SystemTestCertManager.generateStrimziCaCertAndKey(this.intermediateCa, this.subjectDn);
 
@@ -59,29 +56,6 @@ public class SystemTestCertHolder {
         this.caCertSecretName = caCertSecretName;
         this.caKeySecretName = caKeySecretName;
     }
-
-    public SystemTestCertHolder generateNewCaWithBundle(ExtensionContext extensionContext) {
-        this.generateNewCa(extensionContext)
-            .generateNewBundle(extensionContext);
-
-        return this;
-    }
-
-    private SystemTestCertHolder generateNewCa(final ExtensionContext extensionContext) {
-        final String testSuiteName = extensionContext.getRequiredTestClass().getSimpleName();
-        final String clusterCa = "C=CZ, L=Prague, O=StrimziTest, CN=" + testSuiteName + "ClusterCA";
-
-        this.systemTestCa = SystemTestCertManager.generateStrimziCaCertAndKey(this.intermediateCa, clusterCa);
-
-        return this;
-    }
-
-    private SystemTestCertHolder generateNewBundle(final ExtensionContext extensionContext) {
-        this.bundle = SystemTestCertManager.exportToPemFiles(this.systemTestCa, this.intermediateCa, this.strimziRootCa);
-
-        return this;
-    }
-
 
     /**
      * Prepares custom Cluster and Clients key-pair and creates related Secrets with initialization of annotation

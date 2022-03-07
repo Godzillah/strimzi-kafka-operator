@@ -19,7 +19,7 @@ import io.strimzi.systemtest.kafkaclients.clients.InternalKafkaClient;
 import io.strimzi.systemtest.kafkaclients.internalClients.KafkaClients;
 import io.strimzi.systemtest.kafkaclients.internalClients.KafkaClientsBuilder;
 import io.strimzi.systemtest.resources.crd.KafkaResource;
-import io.strimzi.systemtest.security.SystemTestCertHolder;
+import io.strimzi.systemtest.security.SystemTestCaHolder;
 import io.strimzi.systemtest.security.SystemTestCertManager;
 import io.strimzi.systemtest.storage.TestStorage;
 import io.strimzi.systemtest.templates.crd.KafkaClientsTemplates;
@@ -72,52 +72,13 @@ public class CustomCaST extends AbstractST {
     void testReplacingCustomClusterKeyPairToInvokeRenewalProcess(ExtensionContext extensionContext) throws IOException, NoSuchAlgorithmException, InvalidKeySpecException {
         final TestStorage ts = new TestStorage(extensionContext);
         // 0. Generate root and intermediate certificate authority with cluster CA
-        SystemTestCertHolder clusterCa =  new SystemTestCertHolder(extensionContext,
-            "CN=" + extensionContext.getRequiredTestClass().getSimpleName() + "ClusterCA",
+        SystemTestCaHolder clusterCa =  new SystemTestCaHolder(
+            "C=CZ, L=Prague, O=StrimziTest, CN=" + extensionContext.getRequiredTestClass().getSimpleName() + "ClusterCA",
             KafkaResources.clusterCaCertificateSecretName(ts.getClusterName()),
             KafkaResources.clusterCaKeySecretName(ts.getClusterName()));
 
         prepareTestCaWithBundleAndKafkaCluster(extensionContext, clusterCa, ts);
-
-        // ------- public key part
-
-        // 4. Update the Secret for the CA certificate.
-        //  a) Edit the existing secret to add the new CA certificate and update the certificate generation annotation value.
-        //  b) Rename the current CA certificate to retain it
-        final Secret clusterCaCertificateSecret = kubeClient(ts.getNamespaceName()).getSecret(ts.getNamespaceName(), KafkaResources.clusterCaCertificateSecretName(ts.getClusterName()));
-        final String oldCaCertName = clusterCa.retrieveOldCertificateName(clusterCaCertificateSecret, "ca.crt");
-
-        // store the old cert
-        clusterCaCertificateSecret.getData().put(oldCaCertName, clusterCaCertificateSecret.getData().get("ca.crt"));
-
-        //  c) Encode your new CA certificate into base64.
-        LOGGER.info("Generating a new custom 'Cluster certificate authority' with `Root` and `Intermediate` for Strimzi and PEM bundles.");
-        clusterCa = new SystemTestCertHolder(extensionContext,
-            "CN=" + extensionContext.getRequiredTestClass().getSimpleName() + "ClusterCA",
-            KafkaResources.clusterCaCertificateSecretName(ts.getClusterName()),
-            KafkaResources.clusterCaKeySecretName(ts.getClusterName()));
-
-        //  d) Update the CA certificate.
-        clusterCaCertificateSecret.getData().put("ca.crt", Base64.getEncoder().encodeToString(Files.readAllBytes(Paths.get(clusterCa.getBundle().getCertPath()))));
-
-        //  e) Increase the value of the CA certificate generation annotation.
-        //  f) Save the secret with the new CA certificate and certificate generation annotation value.
-        SystemTestCertHolder.increaseCertGenerationCounterInSecret(clusterCaCertificateSecret, ts, Ca.ANNO_STRIMZI_IO_CA_CERT_GENERATION);
-
-        // ------- private key part
-
-        // 5. Update the Secret for the CA key used to sign your new CA certificate.
-        //  a) Edit the existing secret to add the new CA key and update the key generation annotation value.
-        final Secret clusterCaKeySecret = kubeClient(ts.getNamespaceName()).getSecret(ts.getNamespaceName(), KafkaResources.clusterCaKeySecretName(ts.getClusterName()));
-
-        //  b) Encode the CA key into base64.
-        //  c) Update the CA key.
-        final File strimziKeyPKCS8 = SystemTestCertManager.convertPrivateKeyToPKCS8File(clusterCa.getSystemTestCa().getPrivateKey());
-        clusterCaKeySecret.getData().put("ca.key", Base64.getEncoder().encodeToString(Files.readAllBytes(Paths.get(strimziKeyPKCS8.getAbsolutePath()))));
-
-        // d) Increase the value of the CA key generation annotation.
-        // 6. Save the secret with the new CA key and key generation annotation value.
-        SystemTestCertHolder.increaseCertGenerationCounterInSecret(clusterCaKeySecret, ts, Ca.ANNO_STRIMZI_IO_CA_KEY_GENERATION);
+        replaceCaKeyPairToInvokeRenewalProcess(ts, clusterCa);
 
         // --- verification phase (Rolling Update of components)
 
@@ -150,50 +111,13 @@ public class CustomCaST extends AbstractST {
     void testReplacingCustomClientsKeyPairToInvokeRenewalProcess(ExtensionContext extensionContext) throws IOException, NoSuchAlgorithmException, InvalidKeySpecException {
         final TestStorage ts = new TestStorage(extensionContext);
         // 0. Generate root and intermediate certificate authority with clients CA
-        SystemTestCertHolder clientsCa = new SystemTestCertHolder(extensionContext, "CN=" + extensionContext.getRequiredTestClass().getSimpleName() + "ClientsCA",
+        SystemTestCaHolder clientsCa = new SystemTestCaHolder(
+            "C=CZ, L=Prague, O=StrimziTest, CN=" + extensionContext.getRequiredTestClass().getSimpleName() + "ClientsCA",
             KafkaResources.clientsCaCertificateSecretName(ts.getClusterName()),
             KafkaResources.clientsCaKeySecretName(ts.getClusterName()));
 
         prepareTestCaWithBundleAndKafkaCluster(extensionContext, clientsCa, ts);
-
-        // ------- public key part
-
-        // 4. Update the Secret for the CA certificate.
-        //  a) Edit the existing secret to add the new CA certificate and update the certificate generation annotation value.
-        //  b) Rename the current CA certificate to retain it
-        final Secret clientsCaCertificateSecret = kubeClient(ts.getNamespaceName()).getSecret(ts.getNamespaceName(), KafkaResources.clientsCaCertificateSecretName(ts.getClusterName()));
-        final String oldCaCertName = clientsCa.retrieveOldCertificateName(clientsCaCertificateSecret, "ca.crt");
-
-        // store the old cert
-        clientsCaCertificateSecret.getData().put(oldCaCertName, clientsCaCertificateSecret.getData().get("ca.crt"));
-
-        //  c) Encode your new CA certificate into base64.
-        LOGGER.info("Generating a new custom 'User certificate authority' with `Root` and `Intermediate` for Strimzi and PEM bundles.");
-        clientsCa = new SystemTestCertHolder(extensionContext,
-            "CN=" + extensionContext.getRequiredTestClass().getSimpleName() + "ClientsCA",
-            KafkaResources.clientsCaCertificateSecretName(ts.getClusterName()),
-            KafkaResources.clientsCaKeySecretName(ts.getClusterName()));
-
-        //  d) Update the CA certificate.
-        clientsCaCertificateSecret.getData().put("ca.crt", Base64.getEncoder().encodeToString(Files.readAllBytes(Paths.get(clientsCa.getBundle().getCertPath()))));
-
-        //  e) Increase the value of the CA certificate generation annotation.
-        //  f) Save the secret with the new CA certificate and certificate generation annotation value.
-        SystemTestCertHolder.increaseCertGenerationCounterInSecret(clientsCaCertificateSecret, ts, Ca.ANNO_STRIMZI_IO_CA_CERT_GENERATION);
-
-        // ------- private key part
-
-        // 5. Update the Secret for the CA key used to sign your new CA certificate.
-        //  a) Edit the existing secret to add the new CA key and update the key generation annotation value.
-        final Secret clientsCaKeySecret = kubeClient(ts.getNamespaceName()).getSecret(ts.getNamespaceName(), KafkaResources.clientsCaKeySecretName(ts.getClusterName()));
-
-        //  b) Encode the CA key into base64.
-        //  c) Update the CA key.
-        final File strimziKeyPKCS8 = SystemTestCertManager.convertPrivateKeyToPKCS8File(clientsCa.getSystemTestCa().getPrivateKey());
-        clientsCaKeySecret.getData().put("ca.key", Base64.getEncoder().encodeToString(Files.readAllBytes(Paths.get(strimziKeyPKCS8.getAbsolutePath()))));
-        // d) Increase the value of the CA key generation annotation.
-        // 6. Save the secret with the new CA key and key generation annotation value.
-        SystemTestCertHolder.increaseCertGenerationCounterInSecret(clientsCaKeySecret, ts, Ca.ANNO_STRIMZI_IO_CA_KEY_GENERATION);
+        replaceCaKeyPairToInvokeRenewalProcess(ts, clientsCa);
 
         // --- verification phase (Rolling Update of components)
 
@@ -207,8 +131,8 @@ public class CustomCaST extends AbstractST {
         }, ts.getNamespaceName());
 
         // 9. On the next reconciliation, the Cluster Operator performs a `rolling update` only for the
-        // Kafka cluster. When the rolling update is complete, the Cluster Operator will start a new one to
-        // generate new server certificates signed by the new CA key.
+        // Kafka cluster. The clients CA key is used only by UO to generate the clients certs that will be trusted by
+        // brokers via the clients CA cert.
         RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(ts.getKafkaSelector(), 1, kafkaPods);
 
         // 10. Try to produce messages
@@ -225,7 +149,7 @@ public class CustomCaST extends AbstractST {
      * @param certificateAuthority          certificate authority of Clients or Cluster
      * @param ts                            auxiliary resources for test case
      */
-    private void prepareTestCaWithBundleAndKafkaCluster(final ExtensionContext extensionContext, final SystemTestCertHolder certificateAuthority, final TestStorage ts) {
+    private void prepareTestCaWithBundleAndKafkaCluster(final ExtensionContext extensionContext, final SystemTestCaHolder certificateAuthority, final TestStorage ts) {
         // 1. Prepare correspondent Secrets from generated custom CA certificates
         //  a) Cluster or Clients CA
         certificateAuthority.prepareCustomSecretsFromBundles(ts.getNamespaceName(), ts.getClusterName());
@@ -235,14 +159,14 @@ public class CustomCaST extends AbstractST {
         //     (f.e., Clients CA should not be generated, but the secrets were not found.)
         if (certificateAuthority.getCaCertSecretName().equals(KafkaResources.clusterCaCertificateSecretName(ts.getClusterName())) &&
             certificateAuthority.getCaKeySecretName().equals(KafkaResources.clusterCaKeySecretName(ts.getClusterName()))) {
-            final SystemTestCertHolder clientsCa = new SystemTestCertHolder(extensionContext,
+            final SystemTestCaHolder clientsCa = new SystemTestCaHolder(
                 "CN=" + extensionContext.getRequiredTestClass().getSimpleName() + "ClientsCA",
                 KafkaResources.clientsCaCertificateSecretName(ts.getClusterName()),
                 KafkaResources.clientsCaKeySecretName(ts.getClusterName()));
             clientsCa.prepareCustomSecretsFromBundles(ts.getNamespaceName(), ts.getClusterName());
         } else {
             // otherwise we generate Cluster CA
-            final SystemTestCertHolder clusterCa = new SystemTestCertHolder(extensionContext,
+            final SystemTestCaHolder clusterCa = new SystemTestCaHolder(
                 "CN=" + extensionContext.getRequiredTestClass().getSimpleName() + "ClusterCA",
                 KafkaResources.clusterCaCertificateSecretName(ts.getClusterName()),
                 KafkaResources.clusterCaKeySecretName(ts.getClusterName()));
@@ -282,6 +206,48 @@ public class CustomCaST extends AbstractST {
         }, ts.getNamespaceName());
     }
 
+    private void replaceCaKeyPairToInvokeRenewalProcess(final TestStorage ts, SystemTestCaHolder ca) throws IOException, InvalidKeySpecException, NoSuchAlgorithmException {
+        // ------- public key part
+
+        // 4. Update the Secret for the CA certificate.
+        //  a) Edit the existing secret to add the new CA certificate and update the certificate generation annotation value.
+        //  b) Rename the current CA certificate to retain it
+        final Secret caCertificateSecret = kubeClient(ts.getNamespaceName()).getSecret(ts.getNamespaceName(), ca.getCaCertSecretName());
+        final String oldCaCertName = ca.retrieveOldCertificateName(caCertificateSecret, "ca.crt");
+
+        // store the old cert
+        caCertificateSecret.getData().put(oldCaCertName, caCertificateSecret.getData().get("ca.crt"));
+
+        //  c) Encode your new CA certificate into base64.
+        LOGGER.info("Generating a new custom 'Cluster certificate authority' with `Root` and `Intermediate` for Strimzi and PEM bundles.");
+        ca = new SystemTestCaHolder(
+            ca.getSubjectDn(),
+            KafkaResources.clusterCaCertificateSecretName(ts.getClusterName()),
+            KafkaResources.clusterCaKeySecretName(ts.getClusterName()));
+
+        //  d) Update the CA certificate.
+        caCertificateSecret.getData().put("ca.crt", Base64.getEncoder().encodeToString(Files.readAllBytes(Paths.get(ca.getBundle().getCertPath()))));
+
+        //  e) Increase the value of the CA certificate generation annotation.
+        //  f) Save the secret with the new CA certificate and certificate generation annotation value.
+        SystemTestCaHolder.increaseCertGenerationCounterInSecret(caCertificateSecret, ts, Ca.ANNO_STRIMZI_IO_CA_CERT_GENERATION);
+
+        // ------- private key part
+
+        // 5. Update the Secret for the CA key used to sign your new CA certificate.
+        //  a) Edit the existing secret to add the new CA key and update the key generation annotation value.
+        final Secret caKeySecret = kubeClient(ts.getNamespaceName()).getSecret(ts.getNamespaceName(), ca.getCaKeySecretName());
+
+        //  b) Encode the CA key into base64.
+        //  c) Update the CA key.
+        final File strimziKeyPKCS8 = SystemTestCertManager.convertPrivateKeyToPKCS8File(ca.getSystemTestCa().getPrivateKey());
+        caKeySecret.getData().put("ca.key", Base64.getEncoder().encodeToString(Files.readAllBytes(Paths.get(strimziKeyPKCS8.getAbsolutePath()))));
+
+        // d) Increase the value of the CA key generation annotation.
+        // 6. Save the secret with the new CA key and key generation annotation value.
+        SystemTestCaHolder.increaseCertGenerationCounterInSecret(caKeySecret, ts, Ca.ANNO_STRIMZI_IO_CA_KEY_GENERATION);
+    }
+
     private void producerMessages(final ExtensionContext extensionContext, final TestStorage ts) {
         // 11. Try to produce messages
         final KafkaClients kafkaBasicClientJob = new KafkaClientsBuilder()
@@ -304,11 +270,11 @@ public class CustomCaST extends AbstractST {
         final TestStorage ts = new TestStorage(extensionContext);
         final String testSuite = extensionContext.getRequiredTestClass().getSimpleName();
 
-        final SystemTestCertHolder clientsCa = new SystemTestCertHolder(extensionContext,
+        final SystemTestCaHolder clientsCa = new SystemTestCaHolder(
             "CN=" + testSuite + "ClientsCA",
             KafkaResources.clientsCaCertificateSecretName(ts.getClusterName()),
             KafkaResources.clientsCaKeySecretName(ts.getClusterName()));
-        final SystemTestCertHolder clusterCa = new SystemTestCertHolder(extensionContext,
+        final SystemTestCaHolder clusterCa = new SystemTestCaHolder(
             "CN=" + testSuite + "ClusterCA",
             KafkaResources.clusterCaCertificateSecretName(ts.getClusterName()),
             KafkaResources.clusterCaKeySecretName(ts.getClusterName()));
@@ -407,7 +373,7 @@ public class CustomCaST extends AbstractST {
         return SystemTestCertManager.containsAllDN(certOutIssuer, expectedPrincipal);
     }
 
-    private void checkCustomCaCorrectness(final SystemTestCertHolder caHolder, final X509Certificate certificate) {
+    private void checkCustomCaCorrectness(final SystemTestCaHolder caHolder, final X509Certificate certificate) {
         LOGGER.info("Check ClusterCA and ClientsCA certificates.");
         assertThat("Generated ClientsCA or ClusterCA does not have expected Issuer: " + certificate.getIssuerDN(),
             SystemTestCertManager.containsAllDN(certificate.getIssuerX500Principal().getName(), STRIMZI_INTERMEDIATE_CA));
@@ -420,7 +386,7 @@ public class CustomCaST extends AbstractST {
         TestStorage ts = new TestStorage(extensionContext);
         final String testSuite = extensionContext.getRequiredTestClass().getSimpleName();
 
-        final SystemTestCertHolder clusterCa = new SystemTestCertHolder(extensionContext,
+        final SystemTestCaHolder clusterCa = new SystemTestCaHolder(
             "CN=" + testSuite + "ClusterCA",
             KafkaResources.clusterCaCertificateSecretName(ts.getClusterName()),
             KafkaResources.clusterCaKeySecretName(ts.getClusterName()));
@@ -516,7 +482,7 @@ public class CustomCaST extends AbstractST {
         final TestStorage ts = new TestStorage(extensionContext);
         final String testSuite = extensionContext.getRequiredTestClass().getSimpleName();
 
-        final SystemTestCertHolder clientsCa = new SystemTestCertHolder(extensionContext,
+        final SystemTestCaHolder clientsCa = new SystemTestCaHolder(
             "CN=" + testSuite + "ClientsCA",
             KafkaResources.clientsCaCertificateSecretName(ts.getClusterName()),
             KafkaResources.clientsCaKeySecretName(ts.getClusterName()));
